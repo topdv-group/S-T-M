@@ -1,8 +1,11 @@
+
 /*
 
         THESE ARE THE CODES THAT WERE PUT IN THE ESP AFTER ITS FAILURE AND TRIED TO CHANGE THE LOCATION
         THAT WE HAD INSTALLED TO MAKE IT CLOSER TO THE WIFI.
          WE ARE ALSO STILL IN THE TESTING OF IT. IT REPLACED VERSION 2.3 which had alot of wifi issues and failures.
+
+         In this version there is an addition of OTA UPDATES from gihub
          
   ====================================================================================================
   SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v3.0
@@ -53,6 +56,9 @@
 #include <esp_task_wdt.h>
 #include <vector>
 #include <algorithm>
+#include <HTTPClient.h>
+#include <Update.h>
+#include <WiFiClientSecure.h>
 
 // ====================================================================================================
 // CONFIGURATION CONSTANTS
@@ -107,6 +113,7 @@
 
 unsigned long lastReset = 0;
 const unsigned long dayMillis = 24 * 60 * 60 * 1000UL;
+
 // ====================================================================================================
 // ENUMERATIONS
 // ====================================================================================================
@@ -287,6 +294,75 @@ String tempPassword = "";
 // ====================================================================================================
 String getBlynkStatus();
 void initializeDefaultSchedules();
+
+
+//-----HANDLE OTA FROM GITHUB----
+const float CURRENT_VERSION = 1.0; 
+unsigned long lastOTACheck = 0;
+const unsigned long OTA_INTERVAL = 300000;
+
+void runGithubOTA() {
+  // Path to a text file on GitHub containing just the version number (e.g., "1.1")
+  const char* versionUrl = "https://raw.githubusercontent.com/topdv-group/S-T-M/refs/heads/main/version.txt";
+  const char* binUrl = "https://raw.githubusercontent.com/topdv-group/S-T-M/refs/heads/main/STM.bin";
+  
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+
+  Blynk.virtualWrite(V10, "\n[SYSTEM] Checking for updates...\n");
+
+  // STEP 1: Check Version
+  if (http.begin(client, versionUrl)) {
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      float newVersion = http.getString().toFloat();
+      
+      if (newVersion <= CURRENT_VERSION) {
+        Blynk.virtualWrite(V10, "[SYSTEM] Already up to date (v" + String(CURRENT_VERSION) + ")\n");
+        http.end();
+        return; // Exit function, no update needed
+      }
+      
+      Blynk.virtualWrite(V10, "[SYSTEM] New version v" + String(newVersion) + " found!\n");
+    } else {
+      Blynk.virtualWrite(V10, "[ERROR] Could not read version file.\n");
+      http.end();
+      return;
+    }
+    http.end();
+  }
+
+  // STEP 2: Perform Update
+  Blynk.virtualWrite(V10, "[SYSTEM] Starting download...\n");
+  if (http.begin(client, binUrl)) {
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+      int totalSize = http.getSize();
+      
+      Update.onProgress([](size_t progress, size_t total) {
+        static int lastPercent = -1;
+        int percent = (progress * 100) / total;
+        if (percent != lastPercent && percent % 10 == 0) {
+          Blynk.virtualWrite(V10, "[OTA] Progress: " + String(percent) + "%\n");
+          lastPercent = percent;
+        }
+      });
+
+      if (Update.begin(totalSize)) {
+        size_t written = Update.writeStream(http.getStream());
+        if (written == totalSize && Update.end()) {
+          Blynk.virtualWrite(V10, "✅ [SUCCESS] Update applied. Rebooting...\n");
+          delay(2000);
+          ESP.restart();
+        } else {
+          Blynk.virtualWrite(V10, "❌ [ERROR] Flash failed. Error: " + String(Update.getError()) + "\n");
+        }
+      }
+    }
+    http.end();
+  }
+}
 
 // ====================================================================================================
 // LOGGING SYSTEM (NO AMBIGUOUS OVERLOADS)
@@ -2611,6 +2687,9 @@ void setup() {
   logMessageParts("Messages: 0/", String(BLYNK_MONTHLY_LIMIT), "", "", "", true);
   logMessage("Type 'help' in V10 terminal for commands", true);
   logMessage("====================================================================", true);
+
+  //check for new updates
+    runGithubOTA();
 }
 
 // ====================================================================================================
@@ -2618,6 +2697,17 @@ void setup() {
 // ====================================================================================================
 
 void loop() {
+  //keep blynk alive
+  Blynk.run();
+
+//   //check for updates every 5 minutes
+  // --- NON-BLOCKING 5-MINUTE TIMER ---
+  
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastOTACheck >= OTA_INTERVAL) {
+    lastOTACheck = currentMillis;
+    runGithubOTA();
+  }
 
   // Check if long hours have passed and reset
   if (millis() - lastReset >= dayMillis) {
