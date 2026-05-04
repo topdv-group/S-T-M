@@ -7,9 +7,10 @@
 
          In this version there is an addition of OTA UPDATES from gihub
          the system automatically resets after 5 minutes wifi disconnection
+         add the watch dog for hardware.
          
   ====================================================================================================
-  SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v3.0
+  SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v1.1
   ====================================================================================================
   
   DEVELOPED BY: COT CLUB
@@ -298,7 +299,7 @@ void initializeDefaultSchedules();
 
 
 //-----HANDLE OTA FROM GITHUB----
-const float CURRENT_VERSION = 1.0; 
+const float CURRENT_VERSION = 1.1; 
 unsigned long lastOTACheck = 0;
 const unsigned long OTA_INTERVAL = 300000;
 
@@ -368,6 +369,25 @@ void runGithubOTA() {
 // ====================================================================================================
 // LOGGING SYSTEM (NO AMBIGUOUS OVERLOADS)
 // ====================================================================================================
+
+
+// Set this to the maximum seconds the code can "freeze" before a hardware reboot
+const uint32_t SYSTEM_HARDWARE_WATCHDOG_TIMEOUT_SECONDS_LIMIT = 30; 
+
+// this is the system watchdog
+void initializeSystemHardwareTaskWatchdogTimer() {
+  Serial.println("[HARDWARE] Initializing Task Watchdog...");
+  
+  // 1. Initialize the Watchdog with a 30-second timeout
+  // The 'true' parameter tells it to trigger a system panic/reboot on timeout
+  esp_task_wdt_init(SYSTEM_HARDWARE_WATCHDOG_TIMEOUT_SECONDS_LIMIT, true);
+  
+  // 2. Add the current main loop task to the watchdog monitoring list
+  esp_task_wdt_add(NULL); 
+  
+  Serial.println("[HARDWARE] Watchdog active. System will reboot if frozen for 30s.");
+}
+
 
 //auto reconnect the wifi after 5 minutes or restart
 void handleSystemConnectivityWatchdog() {
@@ -2669,6 +2689,8 @@ BLYNK_WRITE(V10) {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+
+   initializeSystemHardwareTaskWatchdogTimer();
   
   Serial.println("\n====================================================================");
   Serial.println("SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v3.0");
@@ -2752,6 +2774,8 @@ void setup() {
 // ====================================================================================================
 
 void loop() {
+
+  esp_task_wdt_reset();
   //keep blynk alive
   Blynk.run();
   
