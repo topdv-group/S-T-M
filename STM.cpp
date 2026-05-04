@@ -8,6 +8,7 @@
          In this version there is an addition of OTA UPDATES from gihub
          the system automatically resets after 5 minutes wifi disconnection
          add the watch dog for hardware.
+         try to connect every time on blynk after ifind that the bell canring but in blynk its off
          
   ====================================================================================================
   SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v1.1
@@ -2777,7 +2778,17 @@ void loop() {
 
   esp_task_wdt_reset();
   //keep blynk alive
-  Blynk.run();
+   if (Blynk.connected()) {
+    Blynk.run();
+  } else {
+    // Non-blocking reconnect attempt
+    static unsigned long lastReconnect = 0;
+    if (millis() - lastReconnect > 20000) {
+      Blynk.connect();
+      lastReconnect = millis();
+    }
+  }
+
   
   //restarts the ESP when the wifi is off for five minutes
   handleSystemConnectivityWatchdog();
