@@ -6,6 +6,7 @@
          WE ARE ALSO STILL IN THE TESTING OF IT. IT REPLACED VERSION 2.3 which had alot of wifi issues and failures.
 
          In this version there is an addition of OTA UPDATES from gihub
+         the system automatically resets after 5 minutes wifi disconnection
          
   ====================================================================================================
   SCHOOL BELL SYSTEM - ULTIMATE PROFESSIONAL EDITION v3.0
@@ -367,6 +368,56 @@ void runGithubOTA() {
 // ====================================================================================================
 // LOGGING SYSTEM (NO AMBIGUOUS OVERLOADS)
 // ====================================================================================================
+
+//auto reconnect the wifi after 5 minutes or restart
+void handleSystemConnectivityWatchdog() {
+  // Static variables stay in memory but are only visible to this function
+  static unsigned long system_wifi_monitor_last_check_timestamp_ms = 0;
+  static unsigned long system_wifi_connection_lost_initial_timestamp_ms = 0;
+  static bool system_wifi_is_currently_disconnected_flag = false;
+
+  // Constants for intervals
+  const unsigned long SYSTEM_WIFI_CHECK_INTERVAL_MS = 10000;      // Check every 10 seconds
+  const unsigned long SYSTEM_WIFI_MAX_DOWNTIME_BEFORE_RESTART_MS = 300000; // 5 minutes
+
+  unsigned long system_current_loop_timestamp_ms = millis();
+
+  // Only run the check every 10 seconds to save processing power
+  if (system_current_loop_timestamp_ms - system_wifi_monitor_last_check_timestamp_ms >= SYSTEM_WIFI_CHECK_INTERVAL_MS) {
+    system_wifi_monitor_last_check_timestamp_ms = system_current_loop_timestamp_ms;
+
+    if (WiFi.status() != WL_CONNECTED) {
+      // If this is the first time we've noticed it's down, mark the start time
+      if (!system_wifi_is_currently_disconnected_flag) {
+        system_wifi_is_currently_disconnected_flag = true;
+        system_wifi_connection_lost_initial_timestamp_ms = system_current_loop_timestamp_ms;
+        Serial.println("[WATCHDOG] WiFi Lost! Monitoring for 5-minute timeout...");
+      } 
+      else {
+        // Already down, check if the 5-minute limit has passed
+        unsigned long system_current_downtime_duration_ms = system_current_loop_timestamp_ms - system_wifi_connection_lost_initial_timestamp_ms;
+        
+        if (system_current_downtime_duration_ms >= SYSTEM_WIFI_MAX_DOWNTIME_BEFORE_RESTART_MS) {
+          Serial.println("[WATCHDOG] WiFi off for 5 minutes. Restarting ESP32...");
+          delay(1000); 
+          ESP.restart();
+        }
+      }
+      
+      // Attempt a soft reconnect without restarting yet
+      WiFi.begin(); 
+    } 
+    else {
+      // WiFi is connected, reset the watchdog flags
+      if (system_wifi_is_currently_disconnected_flag) {
+        Serial.println("[WATCHDOG] WiFi Restored! Resetting watchdog.");
+      }
+      system_wifi_is_currently_disconnected_flag = false;
+      system_wifi_connection_lost_initial_timestamp_ms = 0;
+    }
+  }
+}
+
 
 void logMessage(const String& message, bool forceToBlynk = false) {
   // Always print to serial
@@ -2688,8 +2739,12 @@ void setup() {
   logMessage("Type 'help' in V10 terminal for commands", true);
   logMessage("====================================================================", true);
 
+  // Keeps the WiFi radio fully active
+  WiFi.setSleep(false); 
+
   //check for new updates
     runGithubOTA();
+  
 }
 
 // ====================================================================================================
@@ -2699,6 +2754,9 @@ void setup() {
 void loop() {
   //keep blynk alive
   Blynk.run();
+  
+  //restarts the ESP when the wifi is off for five minutes
+  handleSystemConnectivityWatchdog();
 
 //   //check for updates every 5 minutes
   // --- NON-BLOCKING 5-MINUTE TIMER ---
